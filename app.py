@@ -151,12 +151,36 @@ def predict_clinical_risk(input_data: ClinicalInput):
     if model is None:
         raise HTTPException(status_code=500, detail="ML Model is not loaded on the server.")
 
-    # 1. Convert input to dict safely (compatible with old & new Pydantic)
+    # 1. Convert input to dict safely
     input_dict = input_data.model_dump() if hasattr(input_data, 'model_dump') else input_data.dict()
     
-    # Optional: If the ML model throws an error because of 'smoking_frequency' not being in the training data, 
-    # uncomment the line below to drop it before predicting.
-    # input_dict.pop('smoking_frequency', None)
+    # Generate explanations BEFORE translating the text, so the doctor gets the readable version
+    explanation = generate_explanation(input_dict)
+
+    # =========================================================
+    # 🔥 THE FIX: TRANSLATE FLUTTER TEXT TO STRICT AI MODEL TEXT
+    # =========================================================
+    # Fix Duration
+    if input_dict.get('duration') == "< 2 weeks": input_dict['duration'] = "<2 weeks"
+    elif input_dict.get('duration') == "> 3 weeks": input_dict['duration'] = ">3 weeks"
+
+    # Fix Recurrence
+    if input_dict.get('recurrence') == "First episode": input_dict['recurrence'] = "First"
+    elif input_dict.get('recurrence') == "Recurrent (same site)": input_dict['recurrence'] = "Same site"
+    elif input_dict.get('recurrence') == "Recurrent (different sites)": input_dict['recurrence'] = "Different site"
+
+    # Fix Site
+    if input_dict.get('site') == "Tongue (Lateral)": input_dict['site'] = "Lateral tongue"
+    elif input_dict.get('site') == "Tongue (Ventral)": input_dict['site'] = "Ventral tongue"
+    elif input_dict.get('site') == "Buccal Mucosa": input_dict['site'] = "Buccal mucosa"
+    elif input_dict.get('site') == "Floor of Mouth": input_dict['site'] = "Floor of mouth"
+
+    # Fix Shape
+    if input_dict.get('shape') == "Round/Ovoid": input_dict['shape'] = "Round"
+
+    # Fix Edge
+    if input_dict.get('edge') == "Punched out": input_dict['edge'] = "Punched"
+    # =========================================================
 
     # 2. Convert to DataFrame
     input_df = pd.DataFrame([input_dict])
@@ -170,10 +194,9 @@ def predict_clinical_risk(input_data: ClinicalInput):
     # 4. Process Results
     risk_score = round(prob * 100, 2)
     category, recommendation = classify_risk(risk_score)
-    explanation = generate_explanation(input_dict)
     suggestions = generate_suggestions(category)
     
-    # Calculate confidence (Scaling 0.5 -> 0% certainty, 1.0 or 0.0 -> 100% certainty)
+    # Calculate confidence
     confidence = round(abs(prob - 0.5) * 2 * 100, 1)
 
     return {
